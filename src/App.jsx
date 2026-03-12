@@ -62,23 +62,22 @@ export default function RegistrationPage() {
   const [spotsLeft, setSpotsLeft] = useState(MAX_SPOTS);
   const [storageReady, setStorageReady] = useState(false);
   const [form, setForm] = useState({ name: "", email: "" });
-  const [status, setStatus] = useState("idle"); // idle | submitting | success | full | error
-  const [alreadyRegistered, setAlreadyRegistered] = useState(false);
+  const [status, setStatus] = useState("idle"); // idle | submitting | success | full | error | duplicate
 
-  // Load spots count from persistent storage
+  // Load registered emails from persistent storage
   useEffect(() => {
-    const loadSpots = async () => {
-      try {
-        const result = await window.storage.get("forge-registrations", true);
-        const taken = parseInt(result.value || "0", 10);
-        setSpotsLeft(Math.max(0, MAX_SPOTS - taken));
-        if (taken >= MAX_SPOTS) setStatus("full");
-      } catch {
-        setSpotsLeft(MAX_SPOTS);
-      }
-      setStorageReady(true);
-    };
-    loadSpots();
+    try {
+      const stored = localStorage.getItem("forge-registrations");
+      const emails = stored ? JSON.parse(stored) : [];
+      const taken = emails.length;
+      
+      setSpotsLeft(Math.max(0, MAX_SPOTS - taken));
+      if (taken >= MAX_SPOTS) setStatus("full");
+    } catch {
+      // If parsing fails, default to empty
+      setSpotsLeft(MAX_SPOTS);
+    }
+    setStorageReady(true);
   }, []);
 
   const handleChange = (e) => {
@@ -92,20 +91,24 @@ export default function RegistrationPage() {
     setStatus("submitting");
 
     try {
-      // Check spots again before submitting
-      let currentTaken = 0;
-      try {
-        const check = await window.storage.get("forge-registrations", true);
-        currentTaken = parseInt(check.value || "0", 10);
-      } catch {}
+      // 1. Load current registrations
+      const stored = localStorage.getItem("forge-registrations");
+      const registeredEmails = stored ? JSON.parse(stored) : [];
 
-      if (currentTaken >= MAX_SPOTS) {
+      // 2. Prevent duplicate submissions
+      if (registeredEmails.includes(form.email.toLowerCase())) {
+        setStatus("duplicate");
+        return;
+      }
+
+      // 3. Check spots again before submitting
+      if (registeredEmails.length >= MAX_SPOTS) {
         setStatus("full");
         setSpotsLeft(0);
         return;
       }
 
-      // Submit to Formspree
+      // 4. Submit to Formspree
       const res = await fetch(`https://formspree.io/f/${FORM_ID}`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
@@ -120,12 +123,14 @@ export default function RegistrationPage() {
 
       if (!res.ok) throw new Error("Formspree error");
 
-      // Increment stored count
-      const newTaken = currentTaken + 1;
-      await window.storage.set("forge-registrations", String(newTaken), true);
-      setSpotsLeft(Math.max(0, MAX_SPOTS - newTaken));
+      // 5. Increment stored count by adding the email to the array
+      registeredEmails.push(form.email.toLowerCase());
+      localStorage.setItem("forge-registrations", JSON.stringify(registeredEmails));
+      
+      setSpotsLeft(Math.max(0, MAX_SPOTS - registeredEmails.length));
       setStatus("success");
     } catch (err) {
+      console.error(err);
       setStatus("error");
     }
   };
@@ -384,6 +389,12 @@ export default function RegistrationPage() {
                 {status === "error" && (
                   <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, color: "#FF6B6B", textAlign: "center" }}>
                     Something went wrong. Make sure the Formspree form ID is configured.
+                  </p>
+                )}
+
+                {status === "duplicate" && (
+                  <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, color: "#F5A623", textAlign: "center" }}>
+                    This email is already registered for the Forge!
                   </p>
                 )}
 
